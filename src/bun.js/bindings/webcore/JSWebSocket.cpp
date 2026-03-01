@@ -250,8 +250,48 @@ static inline JSC::EncodedJSValue constructJSWebSocket3(JSGlobalObject* lexicalG
         }
 
         // Parse TLS options using Zig's SSLConfig.fromJS for full TLS option support
+        // First check for options.tls (Bun native), then fall back to top-level TLS options
+        // (Node.js ws library compatibility: cert, key, ca, rejectUnauthorized, passphrase)
         JSValue tlsOptionsValue = Bun::getOwnPropertyIfExists(globalObject, options, PropertyName(Identifier::fromString(vm, "tls"_s)));
         RETURN_IF_EXCEPTION(throwScope, {});
+
+        // If no explicit tls option, check for top-level TLS properties (Node.js ws compatibility)
+        if (!tlsOptionsValue || tlsOptionsValue.isUndefinedOrNull() || !tlsOptionsValue.isObject()) {
+            auto certValue = Bun::getOwnPropertyIfExists(globalObject, options, PropertyName(Identifier::fromString(vm, "cert"_s)));
+            RETURN_IF_EXCEPTION(throwScope, {});
+            auto keyValue = Bun::getOwnPropertyIfExists(globalObject, options, PropertyName(Identifier::fromString(vm, "key"_s)));
+            RETURN_IF_EXCEPTION(throwScope, {});
+            auto caValue = Bun::getOwnPropertyIfExists(globalObject, options, PropertyName(Identifier::fromString(vm, "ca"_s)));
+            RETURN_IF_EXCEPTION(throwScope, {});
+            auto ruValue = Bun::getOwnPropertyIfExists(globalObject, options, PropertyName(Identifier::fromString(vm, "rejectUnauthorized"_s)));
+            RETURN_IF_EXCEPTION(throwScope, {});
+
+            bool hasTopLevelTLS = (certValue && !certValue.isUndefinedOrNull()) ||
+                                  (keyValue && !keyValue.isUndefinedOrNull()) ||
+                                  (caValue && !caValue.isUndefinedOrNull()) ||
+                                  (ruValue && !ruValue.isUndefinedOrNull());
+
+            if (hasTopLevelTLS) {
+                // Build a TLS options object from top-level properties
+                JSC::JSObject* syntheticTls = JSC::constructEmptyObject(globalObject);
+                if (certValue && !certValue.isUndefinedOrNull())
+                    syntheticTls->putDirect(vm, Identifier::fromString(vm, "cert"_s), certValue);
+                if (keyValue && !keyValue.isUndefinedOrNull())
+                    syntheticTls->putDirect(vm, Identifier::fromString(vm, "key"_s), keyValue);
+                if (caValue && !caValue.isUndefinedOrNull())
+                    syntheticTls->putDirect(vm, Identifier::fromString(vm, "ca"_s), caValue);
+                if (ruValue && !ruValue.isUndefinedOrNull())
+                    syntheticTls->putDirect(vm, Identifier::fromString(vm, "rejectUnauthorized"_s), ruValue);
+
+                auto passphraseValue = Bun::getOwnPropertyIfExists(globalObject, options, PropertyName(Identifier::fromString(vm, "passphrase"_s)));
+                RETURN_IF_EXCEPTION(throwScope, {});
+                if (passphraseValue && !passphraseValue.isUndefinedOrNull())
+                    syntheticTls->putDirect(vm, Identifier::fromString(vm, "passphrase"_s), passphraseValue);
+
+                tlsOptionsValue = JSValue(syntheticTls);
+            }
+        }
+
         if (tlsOptionsValue && !tlsOptionsValue.isUndefinedOrNull() && tlsOptionsValue.isObject()) {
             // Also extract rejectUnauthorized for backwards compatibility
             if (JSC::JSObject* tlsOptions = tlsOptionsValue.getObject()) {

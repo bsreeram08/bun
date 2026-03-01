@@ -156,6 +156,39 @@ class BunWebSocket extends EventEmitter {
       proxy = options?.proxy;
       tlsOptions = options?.tls;
 
+      // Support top-level TLS options for Node.js ws compatibility (mTLS)
+      // In Node.js ws library, cert/key/ca/rejectUnauthorized/passphrase are passed
+      // at the top level of the options object and forwarded to tls.connect().
+      if (!tlsOptions) {
+        const newTlsOptions = {};
+        let hasTlsOptions = false;
+
+        if (options.rejectUnauthorized !== undefined) {
+          newTlsOptions.rejectUnauthorized = options.rejectUnauthorized;
+          hasTlsOptions = true;
+        }
+        if (options.ca) {
+          newTlsOptions.ca = options.ca;
+          hasTlsOptions = true;
+        }
+        if (options.cert) {
+          newTlsOptions.cert = options.cert;
+          hasTlsOptions = true;
+        }
+        if (options.key) {
+          newTlsOptions.key = options.key;
+          hasTlsOptions = true;
+        }
+        if (options.passphrase) {
+          newTlsOptions.passphrase = options.passphrase;
+          hasTlsOptions = true;
+        }
+
+        if (hasTlsOptions) {
+          tlsOptions = newTlsOptions;
+        }
+      }
+
       // Extract from agent if provided (like HttpsProxyAgent)
       agent = options?.agent;
       if ($isObject(agent)) {
